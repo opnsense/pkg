@@ -165,6 +165,19 @@ curl_do_fetch(struct curl_userdata *data, CURL *cl, struct curl_repodata *cr)
 		curl_easy_setopt(cl, CURLOPT_SSL_VERIFYPEER, 0L);
 	if (getenv("SSL_NO_VERIFY_HOSTNAME") != NULL)
 		curl_easy_setopt(cl, CURLOPT_SSL_VERIFYHOST, 0L);
+	if (getenv("SSL_NO_TLS1") != NULL &&
+	    getenv("SSL_NO_TLS1_1") != NULL &&
+	    getenv("SSL_NO_TLS1_2") != NULL) {
+		curl_easy_setopt(cl, CURLOPT_SSLVERSION,
+		    (long)CURL_SSLVERSION_TLSv1_3);
+	}
+	if ((tmp = getenv("SSL_CA_CERT_PATH")) != NULL) {
+		curl_easy_setopt(cl, CURLOPT_CAPATH, tmp);
+	}
+	if (getenv("SSL_CRL_VERIFY") != NULL &&
+	    getenv("SSL_CRL_OPTIONAL") != NULL) {
+		curl_easy_setopt(cl, CURLOPT_CRLVERIFY, 1L);
+	}
 	curl_multi_add_handle(cr->cm, cl);
 
 	while(still_running) {
@@ -474,6 +487,20 @@ do_retry:
 		curl_easy_setopt(cl, CURLOPT_CAINFO, ssl_ca_cert_file);
 	if (ssl_ca_cert_path != NULL)
 		curl_easy_setopt(cl, CURLOPT_CAPATH, ssl_ca_cert_path);
+	if (getenv("SSL_NO_VERIFY_PEER") != NULL)
+		curl_easy_setopt(cl, CURLOPT_SSL_VERIFYPEER, 0L);
+	if (getenv("SSL_NO_VERIFY_HOSTNAME") != NULL)
+		curl_easy_setopt(cl, CURLOPT_SSL_VERIFYHOST, 0L);
+	if (getenv("SSL_NO_TLS1") != NULL &&
+	    getenv("SSL_NO_TLS1_1") != NULL &&
+	    getenv("SSL_NO_TLS1_2") != NULL) {
+		curl_easy_setopt(cl, CURLOPT_SSLVERSION,
+		    (long)CURL_SSLVERSION_TLSv1_3);
+	}
+	if (getenv("SSL_CRL_VERIFY") != NULL &&
+	    getenv("SSL_CRL_OPTIONAL") != NULL) {
+		curl_easy_setopt(cl, CURLOPT_CRLVERIFY, 1L);
+	}
 	if (netrc_file != NULL)
 		curl_easy_setopt(cl, CURLOPT_NETRC_FILE, netrc_file);
 	curl_easy_setopt(cl, CURLOPT_NETRC, 1L);

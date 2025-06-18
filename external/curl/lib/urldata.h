@@ -281,6 +281,7 @@ struct ssl_primary_config {
   BIT(verifypeer);       /* set TRUE if this is desired */
   BIT(verifyhost);       /* set TRUE if CN/SAN must match hostname */
   BIT(verifystatus);     /* set TRUE if certificate status must be checked */
+  BIT(verifycrl);        /* set TRUE to enable optional CRL verification */
   BIT(cache_session);    /* cache session or not */
 };
 

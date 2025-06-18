@@ -711,6 +711,15 @@ static CURLcode setopt_bool(struct Curl_easy *data, CURLoption option,
     /* Update the current connection ssl_config. */
     Curl_ssl_conn_config_update(data, FALSE);
     break;
+  case CURLOPT_CRLVERIFY:
+    /*
+     * Enable integrated optional CRL verification
+     */
+    data->set.ssl.primary.verifycrl = enabled;
+
+    /* Update the current connection ssl_config. */
+    Curl_ssl_conn_config_update(data, FALSE);
+    break;
 #ifndef CURL_DISABLE_DOH
   case CURLOPT_DOH_SSL_VERIFYPEER:
     /*

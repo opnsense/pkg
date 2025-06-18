@@ -3325,6 +3325,7 @@ static CURLcode ossl_populate_x509_store(struct Curl_cfilter *cf,
     (ca_info_blob ? NULL : conn_config->CAfile);
   const char * const ssl_capath = conn_config->CApath;
   const char * const ssl_crlfile = ssl_config->primary.CRLfile;
+  const bool verifycrl = ssl_config->primary.verifycrl;
   const bool verifypeer = conn_config->verifypeer;
   bool imported_native_ca = FALSE;
   bool imported_ca_info_blob = FALSE;
@@ -3443,6 +3444,14 @@ static CURLcode ossl_populate_x509_store(struct Curl_cfilter *cf,
                          X509_V_FLAG_CRL_CHECK|X509_V_FLAG_CRL_CHECK_ALL);
 
     infof(data, "  CRLfile: %s", ssl_crlfile);
+  }
+
+  if(verifycrl) {
+    /* tell OpenSSL to verify CRLs which are in the trust CA path or cert
+     * file */
+    infof(data, "using CRL verify: yes");
+    X509_STORE_set_flags(store,
+                         X509_V_FLAG_CRL_CHECK|X509_V_FLAG_CRL_CHECK_ALL);
   }
 
   if(verifypeer) {
@@ -3650,6 +3659,52 @@ CURLcode Curl_ssl_setup_x509_store(struct Curl_cfilter *cf,
 }
 #endif /* HAVE_SSL_X509_STORE_SHARE */
 
+static int
+fetch_ssl_cb_verify_crt(int verified, X509_STORE_CTX *ctx)
+{
+        X509 *crt;
+        X509_NAME *name;
+        char *str;
+
+        str = NULL;
+
+        /*
+         * CLRs may be defined explictly but not always.  The absence of a
+         * CRL distribution point is no indication that a CRL does not exist
+         * which also means the CRL check being enforced will require to have
+         * proper CRLs in place for the certificates to be checked which can
+         * not be guaranteed for a random hostname on the Internet.  Disable
+         * the specific OpenSSL error that deals with this case given that
+         * we do make the utmost effort to supply a proper list of CRLs that
+         * are required to verify the certificate(s) in question.
+         */
+        if (!verified && X509_STORE_CTX_get_error(ctx) == X509_V_ERR_UNABLE_TO_GET_CRL) {
+                if (X509_STORE_CTX_get_error_depth(ctx) != 0) {
+                        if ((crt = X509_STORE_CTX_get_current_cert(ctx)) != NULL &&
+                            (name = X509_get_subject_name(crt)) != NULL)
+                                str = X509_NAME_oneline(name, 0, 0);
+                        fprintf(stderr, "No CRL was provided for CA %s",
+                            str != NULL ? str : "no relevant certificate");
+                        OPENSSL_free(str);
+                }
+
+                verified = 1;
+        }
+
+        str = NULL;
+
+        if (!verified) {
+                if ((crt = X509_STORE_CTX_get_current_cert(ctx)) != NULL &&
+                    (name = X509_get_subject_name(crt)) != NULL)
+                        str = X509_NAME_oneline(name, 0, 0);
+                fprintf(stderr, "Certificate verification failed for %s (%d)\n",
+                    str != NULL ? str : "no relevant certificate",
+                    X509_STORE_CTX_get_error(ctx));
+                OPENSSL_free(str);
+        }
+
+        return (verified);
+}
 
 static CURLcode
 ossl_init_session_and_alpns(struct ossl_ctx *octx,
@@ -4004,6 +4059,7 @@ CURLcode Curl_ossl_ctx_init(struct ossl_ctx *octx,
   char * const ssl_cert = ssl_config->primary.clientcert;
   const struct curl_blob *ssl_cert_blob = ssl_config->primary.cert_blob;
   const char * const ssl_cert_type = ssl_config->cert_type;
+  const bool verifycrl = ssl_config->primary.verifycrl;
   const bool verifypeer = conn_config->verifypeer;
   unsigned int ssl_version_min;
   char error_buffer[256];
@@ -4243,7 +4299,8 @@ CURLcode Curl_ossl_ctx_init(struct ossl_ctx *octx,
    * anyway. In the latter case the result of the verification is checked with
    * SSL_get_verify_result() below. */
   SSL_CTX_set_verify(octx->ssl_ctx,
-                     verifypeer ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, NULL);
+                     verifypeer ? SSL_VERIFY_PEER : SSL_VERIFY_NONE,
+                     verifycrl ? fetch_ssl_cb_verify_crt : NULL);
 
   /* Enable logging of secrets to the file specified in env SSLKEYLOGFILE. */
 #ifdef HAVE_KEYLOG_CALLBACK
@@ -4839,6 +4896,7 @@ CURLcode Curl_ossl_check_peer_cert(struct Curl_cfilter *cf,
   const char *ptr;
   BIO *mem = BIO_new(BIO_s_mem());
   bool strict = (conn_config->verifypeer || conn_config->verifyhost);
+  const bool verifycrl = ssl_config->primary.verifycrl;
   struct dynbuf dname;
 
   DEBUGASSERT(octx);
@@ -4985,7 +5043,8 @@ CURLcode Curl_ossl_check_peer_cert(struct Curl_cfilter *cf,
 
     lerr = SSL_get_verify_result(octx->ssl);
     ssl_config->certverifyresult = lerr;
-    if(lerr != X509_V_OK) {
+    /* XXX wrong code path when verifycrl excludes this possible error */
+    if(lerr != X509_V_OK && !(verifycrl && lerr == X509_V_ERR_UNABLE_TO_GET_CRL)) {
       if(conn_config->verifypeer) {
         /* We probably never reach this, because SSL_connect() will fail
            and we return earlier if verifypeer is set? */
