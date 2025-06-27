@@ -37,7 +37,7 @@ do_lock(struct pkgdb *db, struct pkg *pkg, bool batch)
 		if (!quiet)
 			pkg_printf("%n-%v: already locked\n",
 			       pkg, pkg);
-		return (EPKG_FATAL);
+		return (EPKG_OK);
 	}
 
 	if (!query_yesno(false, "%n-%v: lock this package? ",
@@ -59,7 +59,7 @@ do_unlock(struct pkgdb *db, struct pkg *pkg, bool batch)
 			return (EPKG_OK);
 		if (!quiet)
 			pkg_printf("%n-%v: already unlocked\n", pkg, pkg);
-		return (EPKG_FATAL);
+		return (EPKG_OK);
 	}
 
 	if (!query_yesno(false, "%n-%v: unlock this package? ",
