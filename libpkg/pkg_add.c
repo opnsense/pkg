@@ -985,6 +985,7 @@ pkg_extract_finalize(struct pkg *pkg, tempdirs_t *tempdirs)
 	struct pkg_file *f = NULL;
 	struct pkg_dir *d = NULL;
 	char path[MAXPATHLEN + 8];
+	char cwd[MAXPATHLEN];
 	const char *fto;
 #ifdef HAVE_CHFLAGSAT
 	bool install_as_user;
@@ -992,14 +993,46 @@ pkg_extract_finalize(struct pkg *pkg, tempdirs_t *tempdirs)
 	install_as_user = (getenv("INSTALL_AS_USER") != NULL);
 #endif
 
+	if (!getcwd(cwd, MAXPATHLEN)) {
+		pkg_emit_error("Please report to OPNsense: "
+		    "could not get current working dir");
+		cwd[0] = '\0';
+	}
 
 	if (tempdirs != NULL) {
 		vec_foreach(*tempdirs, i) {
 			struct tempdir *t = tempdirs->d[i];
 			if (renameat(pkg->rootfd, RELATIVE_PATH(t->temp),
 			    pkg->rootfd, RELATIVE_PATH(t->name)) != 0) {
-				pkg_fatal_errno("Fail to rename %s -> %s",
-				    t->temp, t->name);
+				if (errno == ENOENT) {
+					static struct timespec ts = { .tv_nsec = 0, .tv_sec = 10};
+					char ncwd[MAXPATHLEN];
+
+					pkg_errno("Fail to rename %s -> %s (1)",
+					    t->temp, t->name);
+
+					pkg_emit_error("Please report to OPNsense: "
+					    "retrying in %d seconds due to ENOENT at cwd = %s",
+					    (int)ts.tv_sec, getcwd(ncwd, MAXPATHLEN) ? ncwd : "(nil)");
+
+					(void)nanosleep(&ts, NULL);
+
+					/* clear timer for all subsequent runs */
+					ts.tv_nsec = 10 * 1000;
+					ts.tv_sec = 0;
+
+					if (cwd[0] != '\0') {
+						/* probably not needed but let's try and see */
+						chdir(cwd);
+					}
+
+					if (renameat(pkg->rootfd, RELATIVE_PATH(f->temppath),
+					    pkg->rootfd, RELATIVE_PATH(fto)) == -1) {
+						pkg_fatal_errno("Fail to rename %s -> %s (2)", f->temppath, fto);
+					}
+				} else {
+					pkg_fatal_errno("Fail to rename %s -> %s (1)", f->temppath, fto);
+				}
 			}
 			free(t);
 		}
@@ -1046,8 +1079,34 @@ pkg_extract_finalize(struct pkg *pkg, tempdirs_t *tempdirs)
 		}
 		if (renameat(pkg->rootfd, RELATIVE_PATH(f->temppath),
 		    pkg->rootfd, RELATIVE_PATH(fto)) == -1) {
-			pkg_fatal_errno("Fail to rename %s -> %s",
-			    f->temppath, fto);
+			if (errno == ENOENT) {
+				static struct timespec ts = { .tv_nsec = 0, .tv_sec = 10};
+				char ncwd[MAXPATHLEN];
+
+				pkg_errno("Fail to rename %s -> %s (3)", f->temppath, fto);
+
+				pkg_emit_error("Please report to OPNsense: "
+				    "retrying in %d seconds due to ENOENT at cwd = %s",
+				    (int)ts.tv_sec, getcwd(ncwd, MAXPATHLEN) ? ncwd : "(nil)");
+
+				(void)nanosleep(&ts, NULL);
+
+				/* clear timer for all subsequent runs */
+				ts.tv_nsec = 10 * 1000;
+				ts.tv_sec = 0;
+
+				if (cwd[0] != '\0') {
+					/* probably not needed but let's try and see */
+					chdir(cwd);
+				}
+
+				if (renameat(pkg->rootfd, RELATIVE_PATH(f->temppath),
+				    pkg->rootfd, RELATIVE_PATH(fto)) == -1) {
+					pkg_fatal_errno("Fail to rename %s -> %s (4)", f->temppath, fto);
+				}
+			} else {
+				pkg_fatal_errno("Fail to rename %s -> %s (3)", f->temppath, fto);
+			}
 		}
 
 		if (set_chflags(pkg->rootfd, fto, f->fflags) != EPKG_OK)
